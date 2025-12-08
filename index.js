@@ -32,10 +32,12 @@ async function run() {
     const servicesCollection = db.collection("services");
 
 
-     app.get("/services", async(req,res) =>{
-    
-    })
-    
+    app.get("/services", async (req, res) => {
+  const result = await servicesCollection.find().toArray();
+  res.send(result);
+});
+
+
 // Insert
      app.post("/services", async(req,res) =>{
         const service =req.body;
