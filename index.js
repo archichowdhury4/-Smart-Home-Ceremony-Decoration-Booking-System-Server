@@ -57,6 +57,14 @@ async function run() {
   res.send(topServices);
 });
 
+// details api
+app.get("/services/:id", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const result = await servicesCollection.findOne({ id: id });
+  res.send(result);
+});
+
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
