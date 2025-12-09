@@ -32,6 +32,7 @@ async function run() {
     const servicesCollection = db.collection("services");
 
 
+    // services api
     app.get("/services", async (req, res) => {
   const result = await servicesCollection.find().toArray();
   res.send(result);
@@ -44,6 +45,18 @@ async function run() {
         const result = await servicesCollection.insertOne(service);
         res.send(result);
     })
+
+// top-services api
+  app.get("/top-services", async (req, res) => {
+  const topServices = await servicesCollection
+    .find()
+    .sort({ rating: -1 })
+    .limit(6)
+    .toArray();
+
+  res.send(topServices);
+});
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
