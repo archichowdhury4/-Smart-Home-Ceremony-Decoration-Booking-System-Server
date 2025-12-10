@@ -72,6 +72,24 @@ app.get("/services/:id", async (req, res) => {
       const result = await bookingsCollection.insertOne(booking);
       res.send(result);
     });
+
+//      app.get("/bookings", async (req, res) => {
+//   const result = await bookingsCollection.find().toArray();
+//   res.send(result);
+// });
+
+    app.get("/bookings", async (req, res) => {
+    const query = {};
+    const {email} = req.query
+    if (email) {
+      query.userEmail = email;
+    }
+    const cursor = bookingsCollection.find(query);
+    const result = await cursor.toArray()
+    res.send(result);
+});
+
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
