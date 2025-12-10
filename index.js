@@ -73,11 +73,6 @@ app.get("/services/:id", async (req, res) => {
       res.send(result);
     });
 
-//      app.get("/bookings", async (req, res) => {
-//   const result = await bookingsCollection.find().toArray();
-//   res.send(result);
-// });
-
     app.get("/bookings", async (req, res) => {
     const query = {};
     const {email} = req.query
