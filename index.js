@@ -1,7 +1,8 @@
 const express = require("express");
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express()
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
 require('dotenv').config()
 const port = process.env.PORT || 3000;
 
@@ -60,10 +61,12 @@ async function run() {
 
 // details api
 app.get("/services/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id); 
   const result = await servicesCollection.findOne({ id: id });
   res.send(result);
 });
+
+
 
 
     // POST booking
@@ -84,7 +87,45 @@ app.get("/services/:id", async (req, res) => {
     res.send(result);
 });
 
+app.delete("/services/:id", async (req, res) => {
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  const result = await servicesCollection.deleteOne(query);
+  res.send(result);
+});
 
+// DELETE booking
+app.delete("/bookings/:id", async (req, res) => {
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  const result = await bookingsCollection.deleteOne(query);
+  res.send(result);
+});
+
+// payment related api
+app.post('/create-checkout-session', async (req, res) => {
+         const paymentInfo =req.body;
+          const session = await stripe.checkout.sessions.create({
+line_items: [
+      {
+        // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+        price_data :{
+          currency :  "USD",
+          service_data : {
+            name: paymentInfo.serviceName
+          }
+        },
+        quantity: 1,
+      },
+    ],
+    customer_email: paymentInfo.userEmail,
+    mode: 'payment',
+    metadata: {
+      serviceId : paymentInfo.serviceId
+    },
+    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+  });
+})
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
