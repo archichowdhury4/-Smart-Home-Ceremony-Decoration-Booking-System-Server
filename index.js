@@ -9,7 +9,7 @@ const port = process.env.PORT || 3000;
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("path/to/serviceAccountKey.json");
+const serviceAccount = require("./smart-home-ceremony-decoration-firebase-adminsdk.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -21,23 +21,23 @@ app.use(cors());
 app.use(express.json());
 
 const verifyFBToken = async (req, res, next) => {
-  console.log("header in middleware", req.headers.authorization)
+  // console.log("header in middleware", req.headers.authorization)
     const token = req.headers.authorization;
 
     if (!token) {
         return res.status(401).send({ message: 'unauthorized access' })
     }
 
-    // try {
-    //     const idToken = token.split(' ')[1];
-    //     const decoded = await admin.auth().verifyIdToken(idToken);
-    //     console.log('decoded in the token', decoded);
-    //     req.decoded_email = decoded.email;
-    //     next();
-    // }
-    // catch (err) {
-    //     return res.status(401).send({ message: 'unauthorized access' })
-    // }
+    try {
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        console.log('decoded in the token', decoded);
+        req.decoded_email = decoded.email;
+        next();
+    }
+    catch (err) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
 
 
 }
@@ -56,7 +56,7 @@ async function run() {
     const servicesCollection = db.collection("services");
     const bookingsCollection = db.collection("bookings");
     const usersCollection = db.collection("users");
-    const paymentsCollection = db.collection("payments"); // New collection for payment history
+    const paymentsCollection = db.collection("payments"); 
 
     /** ------------------ SERVICES ------------------ **/
     app.get("/services", async (req, res) => {
@@ -98,21 +98,21 @@ async function run() {
     });
 
     /** ------------------ USERS ------------------ **/
-    app.post("/users", async (req, res) => {
-      const user = req.body;
-      if (!user.email) return res.status(400).send({ success: false, message: "Email required" });
+    app.post('/users', async (req, res) => {
+            const user = req.body;
+            user.role = 'user';
+            user.createdAt = new Date();
+            // const email = user.email;
+            // const userExists = await usersCollection.findOne({ email })
 
-      const existingUser = await usersCollection.findOne({ email: user.email });
-      if (existingUser) return res.send({ success: true, message: "User already exists", user: existingUser });
+            // if (userExists) {
+            //     return res.send({ message: 'user exists' })
+            // }
 
-      const result = await usersCollection.insertOne({ ...user, createdAt: new Date() });
-      res.send({ success: true, message: "User added", result });
-    });
+            const result = await usersCollection.insertOne(user);
+            res.send(result);
+        })
 
-    app.get("/users", async (req, res) => {
-      const users = await usersCollection.find().toArray();
-      res.send(users);
-    });
 
     /** ------------------ STRIPE PAYMENT ------------------ **/
     app.post("/create-checkout-session", async (req, res) => {
@@ -183,23 +183,28 @@ async function run() {
       console.log("headers",req.headers)
       if(email){
         query.userEmail =email
+
+         if (email !== req.decoded_email) {
+                    return res.status(403).send({ message: 'forbidden access' })
+                }
       }
-      const cursor = paymentsCollection.find(query);
+      const cursor = paymentsCollection.find(query).sort({ paidAt: -1 });
       const result = await cursor.toArray();
       res.send(result)
-
-      // const payments = await paymentsCollection.find({ userEmail: email }).sort({ paidAt: -1 }).toArray();
-      // res.send(payments);
     });
 
     console.log("MongoDB connected successfully!");
   } finally {
-    // Do not close client
+    
   }
 }
 
 run().catch(console.dir);
 
-/** ------------------ ROOT ------------------ **/
-app.get("/", (req, res) => res.send("Smart home server running..."));
-app.listen(port, () => console.log(`Server running on port ${port}`));
+app.get('/', (req, res) => {
+    res.send('zap is shifting shifting!')
+})
+
+app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`)
+})
