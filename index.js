@@ -1,18 +1,18 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { MongoClient, ObjectId, ServerApiVersion } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vvoht34.mongodb.net/?appName=Cluster0`;
-
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
 });
@@ -20,52 +20,45 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     await client.connect();
-
     const db = client.db("smart_home_db");
+
     const servicesCollection = db.collection("services");
     const bookingsCollection = db.collection("bookings");
     const usersCollection = db.collection("users");
+    const paymentsCollection = db.collection("payments"); // New collection for payment history
 
-    // Service api
-
+    /** ------------------ SERVICES ------------------ **/
     app.get("/services", async (req, res) => {
-      const result = await servicesCollection.find().toArray();
-      res.send(result);
+      const services = await servicesCollection.find().toArray();
+      res.send(services);
     });
 
     app.get("/top-services", async (req, res) => {
-      const result = await servicesCollection.find().sort({ rating: -1 }).limit(6).toArray();
-      res.send(result);
+      const topServices = await servicesCollection.find().sort({ rating: -1 }).limit(6).toArray();
+      res.send(topServices);
     });
 
     app.get("/services/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await servicesCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+      const service = await servicesCollection.findOne({ _id: new ObjectId(req.params.id) });
+      res.send(service);
     });
 
-    //  BOOKINGS APIs 
-
+    /** ------------------ BOOKINGS ------------------ **/
     app.post("/bookings", async (req, res) => {
-      const result = await bookingsCollection.insertOne({
-        ...req.body,
-        paymentStatus: "unpaid",
-      });
+      const booking = { ...req.body, paymentStatus: "unpaid", createdAt: new Date() };
+      const result = await bookingsCollection.insertOne(booking);
       res.send(result);
     });
 
     app.get("/bookings", async (req, res) => {
-      const query = {};
-      if (req.query.email) query.userEmail = req.query.email;
-
-      const result = await bookingsCollection.find(query).toArray();
-      res.send(result);
+      const query = req.query.email ? { userEmail: req.query.email } : {};
+      const bookings = await bookingsCollection.find(query).toArray();
+      res.send(bookings);
     });
 
     app.get("/bookings/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await bookingsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+      const booking = await bookingsCollection.findOne({ _id: new ObjectId(req.params.id) });
+      res.send(booking);
     });
 
     app.delete("/bookings/:id", async (req, res) => {
@@ -73,27 +66,15 @@ async function run() {
       res.send(result);
     });
 
-    //  USERS APIs 
-
+    /** ------------------ USERS ------------------ **/
     app.post("/users", async (req, res) => {
       const user = req.body;
-
-      if (!user.email) {
-        return res.status(400).send({ success: false, message: "Email is required!" });
-      }
+      if (!user.email) return res.status(400).send({ success: false, message: "Email required" });
 
       const existingUser = await usersCollection.findOne({ email: user.email });
-      if (existingUser) {
-        return res.send({ success: true, message: "User already exists", user: existingUser });
-      }
+      if (existingUser) return res.send({ success: true, message: "User already exists", user: existingUser });
 
-      const result = await usersCollection.insertOne({
-        name: user.name,
-        email: user.email,
-        image: user.image || "",
-        createdAt: new Date(),
-      });
-
+      const result = await usersCollection.insertOne({ ...user, createdAt: new Date() });
       res.send({ success: true, message: "User added", result });
     });
 
@@ -102,67 +83,85 @@ async function run() {
       res.send(users);
     });
 
-  //  STRIPE PAYMENT 
-
+    /** ------------------ STRIPE PAYMENT ------------------ **/
     app.post("/create-checkout-session", async (req, res) => {
+      const { price, serviceName, userEmail, bookingId } = req.body;
+      if (!price || !serviceName || !userEmail || !bookingId) {
+        return res.status(400).send({ error: "Missing payment info" });
+      }
+
       try {
-        const info = req.body;
-
-        if (!info.price || !info.serviceName || !info.userEmail) {
-          return res.status(400).send({ error: "Missing payment info" });
-        }
-
         const session = await stripe.checkout.sessions.create({
           line_items: [
             {
               price_data: {
                 currency: "usd",
-                product_data: { name: info.serviceName },
-                unit_amount: info.price * 100,
+                product_data: { name: serviceName },
+                unit_amount: price * 100,
               },
               quantity: 1,
             },
           ],
-          customer_email: info.userEmail,
           mode: "payment",
-
-          success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?bookingId=${info.bookingId}`,
+          customer_email: userEmail,
+          success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?bookingId=${bookingId}`,
           cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
         });
 
         res.send({ url: session.url });
-      } catch (error) {
-        console.error(error.message);
+      } catch (err) {
+        console.error("Stripe error:", err.message);
         res.status(500).send({ error: "Stripe session failed" });
       }
     });
 
-    //  PAYMENT SUCCESS UPDATE
-
+    /** ------------------ PAYMENT SUCCESS ------------------ **/
     app.patch("/payment-success/:bookingId", async (req, res) => {
-      const bookingId = req.params.bookingId;
+      const { bookingId } = req.params;
 
       try {
-        const result = await bookingsCollection.updateOne(
+        // Update booking status
+        const updateBooking = await bookingsCollection.updateOne(
           { _id: new ObjectId(bookingId) },
           { $set: { paymentStatus: "paid", paidAt: new Date() } }
         );
 
-        if (result.modifiedCount === 0) {
-          return res.status(404).send({ message: "Booking not found" });
-        }
+        if (updateBooking.modifiedCount === 0) return res.status(404).send({ message: "Booking not found" });
 
-        res.send({ message: "Payment updated successfully!" });
+        // Save payment history
+        const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
+        await paymentsCollection.insertOne({
+          bookingId,
+          userEmail: booking.userEmail,
+          serviceName: booking.serviceName,
+          amount: booking.price,
+          paidAt: new Date(),
+        });
+
+        res.send({ message: "Payment updated & saved successfully" });
       } catch (err) {
+        console.error(err);
         res.status(500).send({ message: "Server error" });
       }
     });
 
-    console.log("MongoDB connected ✔");
-  } finally {}
+    /** ------------------ PAYMENT HISTORY ------------------ **/
+    app.get("/payments", async (req, res) => {
+      const email = req.query.email;
+      if (!email) return res.status(400).send({ message: "Email required" });
+
+      const payments = await paymentsCollection.find({ userEmail: email }).sort({ paidAt: -1 }).toArray();
+      res.send(payments);
+    });
+
+    console.log("MongoDB connected successfully!");
+  } finally {
+    // Do not close client
+  }
 }
 
 run().catch(console.dir);
 
+/** ------------------ ROOT ------------------ **/
 app.get("/", (req, res) => res.send("Smart home server running..."));
 app.listen(port, () => console.log(`Server running on port ${port}`));
