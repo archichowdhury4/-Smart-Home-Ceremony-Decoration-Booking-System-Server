@@ -7,9 +7,40 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const app = express();
 const port = process.env.PORT || 3000;
 
+const admin = require("firebase-admin");
+
+const serviceAccount = require("path/to/serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const verifyFBToken = async (req, res, next) => {
+  console.log("header in middleware", req.headers.authorization)
+    const token = req.headers.authorization;
+
+    if (!token) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+    // try {
+    //     const idToken = token.split(' ')[1];
+    //     const decoded = await admin.auth().verifyIdToken(idToken);
+    //     console.log('decoded in the token', decoded);
+    //     req.decoded_email = decoded.email;
+    //     next();
+    // }
+    // catch (err) {
+    //     return res.status(401).send({ message: 'unauthorized access' })
+    // }
+
+
+}
 
 // MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vvoht34.mongodb.net/?appName=Cluster0`;
@@ -146,12 +177,19 @@ async function run() {
     });
 
     /** ------------------ PAYMENT HISTORY ------------------ **/
-    app.get("/payments", async (req, res) => {
+    app.get("/payments",verifyFBToken, async (req, res) => {
       const email = req.query.email;
-      if (!email) return res.status(400).send({ message: "Email required" });
+      const query = {}
+      console.log("headers",req.headers)
+      if(email){
+        query.userEmail =email
+      }
+      const cursor = paymentsCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result)
 
-      const payments = await paymentsCollection.find({ userEmail: email }).sort({ paidAt: -1 }).toArray();
-      res.send(payments);
+      // const payments = await paymentsCollection.find({ userEmail: email }).sort({ paidAt: -1 }).toArray();
+      // res.send(payments);
     });
 
     console.log("MongoDB connected successfully!");
