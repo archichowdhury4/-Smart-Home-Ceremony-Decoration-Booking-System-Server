@@ -102,16 +102,48 @@ async function run() {
             const user = req.body;
             user.role = 'user';
             user.createdAt = new Date();
-            // const email = user.email;
-            // const userExists = await usersCollection.findOne({ email })
+            const email = user.email;
+            const userExists = await usersCollection.findOne({ email })
 
-            // if (userExists) {
-            //     return res.send({ message: 'user exists' })
-            // }
+            if (userExists) {
+                return res.send({ message: 'user exists' })
+            }
 
             const result = await usersCollection.insertOne(user);
             res.send(result);
         })
+
+
+        app.get("/users/:email", async (req, res) => {
+  const email = req.params.email;
+  try {
+    const user = await usersCollection.findOne({ email });
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+    res.send(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+
+app.patch("/users/:email", async (req, res) => {
+  const email = req.params.email;
+  const updateData = req.body;
+
+  try {
+    const result = await usersCollection.updateOne(
+      { email },
+      { $set: updateData }
+    );
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
 
 
     /** ------------------ STRIPE PAYMENT ------------------ **/
