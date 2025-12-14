@@ -57,6 +57,7 @@ async function run() {
     const bookingsCollection = db.collection("bookings");
     const usersCollection = db.collection("users");
     const paymentsCollection = db.collection("payments"); 
+    const decoratorsCollection = db.collection("decorators"); 
 
     /** ------------------ SERVICES ------------------ **/
     app.get("/services", async (req, res) => {
@@ -97,7 +98,7 @@ async function run() {
       res.send(result);
     });
 
-    /** ------------------ USERS ------------------ **/
+// USERS 
     app.post('/users', async (req, res) => {
             const user = req.body;
             user.role = 'user';
@@ -145,8 +146,25 @@ app.patch("/users/:email", async (req, res) => {
   }
 });
 
+// decorators api
+app.get("/decorators", async(req, res) =>{
+  const query = {}
+  if(req.query.status){
+    query.status
+  }
+  const cursor = decoratorsCollection.find(query)
+  const result = await cursor.toArray();
+  res.send(result);
+})
+app.post("/decorators", async(req, res) => {
+  const decorator = req.body;
+  decorator.status = "pending";
+  decorator.createdAt = new Date();
+  const result = await decoratorsCollection.insertOne(decorator);
+  res.send(result)
+})
 
-    /** ------------------ STRIPE PAYMENT ------------------ **/
+// STRIPE PAYMENT
     app.post("/create-checkout-session", async (req, res) => {
       const { price, serviceName, userEmail, bookingId } = req.body;
       if (!price || !serviceName || !userEmail || !bookingId) {
@@ -178,7 +196,7 @@ app.patch("/users/:email", async (req, res) => {
       }
     });
 
-    /** ------------------ PAYMENT SUCCESS ------------------ **/
+// PAYMENT SUCCESS 
     app.patch("/payment-success/:bookingId", async (req, res) => {
       const { bookingId } = req.params;
 
@@ -208,7 +226,7 @@ app.patch("/users/:email", async (req, res) => {
       }
     });
 
-    /** ------------------ PAYMENT HISTORY ------------------ **/
+// PAYMENT HISTORY 
     app.get("/payments",verifyFBToken, async (req, res) => {
       const email = req.query.email;
       const query = {}
@@ -234,9 +252,9 @@ app.patch("/users/:email", async (req, res) => {
 run().catch(console.dir);
 
 app.get('/', (req, res) => {
-    res.send('zap is shifting shifting!')
+    res.send('smart home server is running!')
 })
 
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
+    console.log(`smart home app listening on port ${port}`)
 })
