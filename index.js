@@ -74,6 +74,11 @@ async function run() {
       const service = await servicesCollection.findOne({ _id: new ObjectId(req.params.id) });
       res.send(service);
     });
+   app.post("/services", async(req, res) =>{
+        const product = req.body;
+        const result = await servicesCollection.insertOne(service);
+        res.send(result)
+    })
 
     /** ------------------ BOOKINGS ------------------ **/
     app.post("/bookings", async (req, res) => {
@@ -99,6 +104,11 @@ async function run() {
     });
 
 // USERS 
+app.get("/users",verifyFBToken, async (req, res) => {
+   const cursor=usersCollection.find();
+   const result = await cursor.toArray();
+   res.send(result);
+})
     app.post('/users', async (req, res) => {
             const user = req.body;
             user.role = 'user';
@@ -146,6 +156,19 @@ app.patch("/users/:email", async (req, res) => {
   }
 });
 
+app.patch('/users/:id/role', verifyFBToken, async (req, res) => {
+            const id = req.params.id;
+            const roleInfo = req.body;
+            const query = { _id: new ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    role: roleInfo.role
+                }
+            }
+            const result = await usersCollection.updateOne(query, updatedDoc)
+            res.send(result);
+        })
+
 // decorators api
 app.get("/decorators", async(req, res) =>{
   const query = { }
@@ -176,6 +199,17 @@ app.patch('/decorators/:id', verifyFBToken, async (req, res) => {
             }
 
             const result = await decoratorsCollection.updateOne(query, updatedDoc);
+
+             if (status === 'approved') {
+                const email = req.body.email;
+                const userQuery = { email }
+                const updateUser = {
+                    $set: {
+                        role: 'decorator'
+                    }
+                }
+                const userResult = await usersCollection.updateOne(userQuery, updateUser);
+            }
             res.send(result);
           })
 
