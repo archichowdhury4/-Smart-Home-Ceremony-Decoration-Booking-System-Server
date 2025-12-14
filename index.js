@@ -74,11 +74,35 @@ async function run() {
       const service = await servicesCollection.findOne({ _id: new ObjectId(req.params.id) });
       res.send(service);
     });
-   app.post("/services", async(req, res) =>{
-        const product = req.body;
-        const result = await servicesCollection.insertOne(service);
-        res.send(result)
-    })
+  app.post("/services", async(req, res) => {
+  const service = req.body;  // Rename product → service
+  service.status = service.status || "active";
+  service.createdAt = new Date();
+
+  const result = await servicesCollection.insertOne(service);
+  res.send(result);
+});
+
+app.patch("/services/:id", async (req, res) => {
+  const id = req.params.id;
+  const updatedData = req.body;
+
+  const result = await servicesCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: updatedData }
+  );
+
+  res.send(result);
+});
+
+
+app.delete("/services/:id", async (req, res) => {
+  const id = req.params.id;
+
+  const result = await servicesCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
+
 
     /** ------------------ BOOKINGS ------------------ **/
     app.post("/bookings", async (req, res) => {
