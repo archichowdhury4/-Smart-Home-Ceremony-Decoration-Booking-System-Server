@@ -148,9 +148,9 @@ app.patch("/users/:email", async (req, res) => {
 
 // decorators api
 app.get("/decorators", async(req, res) =>{
-  const query = {}
+  const query = { }
   if(req.query.status){
-    query.status
+    query.status =req.query.status
   }
   const cursor = decoratorsCollection.find(query)
   const result = await cursor.toArray();
@@ -163,6 +163,33 @@ app.post("/decorators", async(req, res) => {
   const result = await decoratorsCollection.insertOne(decorator);
   res.send(result)
 })
+
+app.patch('/decorators/:id', verifyFBToken, async (req, res) => {
+            const status = req.body.status;
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    status: status,
+                    workStatus: 'available'
+                }
+            }
+
+            const result = await decoratorsCollection.updateOne(query, updatedDoc);
+            res.send(result);
+          })
+
+
+app.delete('/decorators/:id', verifyFBToken, async (req, res) => {
+  const id = req.params.id;
+
+  const result = await decoratorsCollection.deleteOne({
+    _id: new ObjectId(id)
+  });
+
+  res.send(result);
+});
+
 
 // STRIPE PAYMENT
     app.post("/create-checkout-session", async (req, res) => {
