@@ -122,10 +122,49 @@ app.delete("/services/:id", async (req, res) => {
       res.send(booking);
     });
 
+    app.patch("/bookings/:id", async (req, res) => {
+  const id = req.params.id;
+  const updatedData = req.body; 
+
+  const result = await bookingsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: updatedData }
+  );
+
+  res.send(result);
+});
+
+
     app.delete("/bookings/:id", async (req, res) => {
       const result = await bookingsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
       res.send(result);
     });
+
+    app.patch("/bookings/:id/assign-decorator", verifyFBToken, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const { decoratorId, decoratorName } = req.body;
+
+    // fetch booking
+    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
+    if (!booking) return res.status(404).send({ message: "Booking not found" });
+
+    if (booking.paymentStatus !== "paid") {
+      return res.status(400).send({ message: "Cannot assign decorator to unpaid booking" });
+    }
+
+    const updateResult = await bookingsCollection.updateOne(
+      { _id: new ObjectId(bookingId) },
+      { $set: { decoratorAssigned: { decoratorId, decoratorName }, updatedAt: new Date() } }
+    );
+
+    res.send({ message: "Decorator assigned successfully", result: updateResult });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
 
 // USERS 
 app.get("/users",verifyFBToken, async (req, res) => {
