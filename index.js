@@ -42,6 +42,9 @@ const verifyFBToken = async (req, res, next) => {
 
 }
 
+
+
+
 // MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vvoht34.mongodb.net/?appName=Cluster0`;
 const client = new MongoClient(uri, {
@@ -59,7 +62,19 @@ async function run() {
     const paymentsCollection = db.collection("payments"); 
     const decoratorsCollection = db.collection("decorators"); 
 
-    /** ------------------ SERVICES ------------------ **/
+     const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user || user.role !== 'admin') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
+
+    //  SERVICES 
     app.get("/services", async (req, res) => {
       const services = await servicesCollection.find().toArray();
       res.send(services);
@@ -75,7 +90,7 @@ async function run() {
       res.send(service);
     });
   app.post("/services", async(req, res) => {
-  const service = req.body;  // Rename product → service
+  const service = req.body;  
   service.status = service.status || "active";
   service.createdAt = new Date();
 
@@ -104,7 +119,7 @@ app.delete("/services/:id", async (req, res) => {
 });
 
 
-    /** ------------------ BOOKINGS ------------------ **/
+    //  BOOKINGS 
     app.post("/bookings", async (req, res) => {
       const booking = { ...req.body, paymentStatus: "unpaid", createdAt: new Date() };
       const result = await bookingsCollection.insertOne(booking);
@@ -140,25 +155,53 @@ app.delete("/services/:id", async (req, res) => {
       res.send(result);
     });
 
-    app.patch("/bookings/:id/assign-decorator", verifyFBToken, async (req, res) => {
-  try {
-    const bookingId = req.params.id;
-    const { decoratorId, decoratorName } = req.body;
+app.patch("/bookings/:id/assign-decorator", verifyAdmin, async (req, res) => {
+  const bookingId = req.params.id;
+  const { decoratorId, decoratorName, decoratorEmail } = req.body;
 
-    // fetch booking
-    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
-    if (!booking) return res.status(404).send({ message: "Booking not found" });
-
-    if (booking.paymentStatus !== "paid") {
-      return res.status(400).send({ message: "Cannot assign decorator to unpaid booking" });
+  const updateResult = await bookingsCollection.updateOne(
+    { _id: new ObjectId(bookingId) },
+    {
+      $set: {
+        decoratorAssigned: {
+          decoratorId,
+          decoratorName,
+          decoratorEmail,
+          assignedAt: new Date()
+        },
+    
+        status: "assigned",
+        updatedAt: new Date(),
+      },
     }
+  );
 
-    const updateResult = await bookingsCollection.updateOne(
-      { _id: new ObjectId(bookingId) },
-      { $set: { decoratorAssigned: { decoratorId, decoratorName }, updatedAt: new Date() } }
-    );
+  res.send({ message: "Decorator assigned successfully", result: updateResult });
+});
 
-    res.send({ message: "Decorator assigned successfully", result: updateResult });
+
+
+
+
+// admin/revenue route
+app.get("/admin/revenue", async (req, res) => {
+  try {
+    const bookings = await bookingsCollection.find().toArray();
+
+    const totalRevenue = bookings
+      .filter(b => b.paymentStatus === "paid")
+      .reduce((sum, b) => sum + b.price, 0);
+
+    const totalPaidBookings = bookings.filter(b => b.paymentStatus === "paid").length;
+    const totalBookings = bookings.length;
+    const totalUnpaidBookings = bookings.filter(b => b.paymentStatus !== "paid").length;
+
+    res.send({
+      totalRevenue,
+      totalPaidBookings,
+      totalBookings,
+      totalUnpaidBookings
+    });
   } catch (err) {
     console.error(err);
     res.status(500).send({ message: "Server error" });
@@ -166,12 +209,62 @@ app.delete("/services/:id", async (req, res) => {
 });
 
 
+// GET /admin/service-demand
+app.get("/admin/service-demand", async (req, res) => {
+  try {
+    const bookings = await bookingsCollection.find().toArray();
+
+    const serviceCount = {};
+    bookings.forEach(b => {
+      const service = b.serviceName;
+      if (serviceCount[service]) {
+        serviceCount[service] += 1;
+      } else {
+        serviceCount[service] = 1;
+      }
+    });
+
+    
+    const chartData = Object.keys(serviceCount).map(service => ({
+      serviceName: service,
+      count: serviceCount[service]
+    }));
+
+    res.send(chartData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+
+
 // USERS 
-app.get("/users",verifyFBToken, async (req, res) => {
-   const cursor=usersCollection.find();
-   const result = await cursor.toArray();
-   res.send(result);
-})
+ app.get('/users', verifyFBToken, async (req, res) => {
+            const searchText = req.query.searchText;
+            const query = {};
+
+            if (searchText) {
+              
+
+                query.$or = [
+                    { displayName: { $regex: searchText, $options: 'i' } },
+                    { email: { $regex: searchText, $options: 'i' } },
+                ]
+
+            }
+
+            const cursor = usersCollection.find(query).sort({ createdAt: -1 }).limit(5);
+            const result = await cursor.toArray();
+            res.send(result);
+        });
+app.get('/users/:email', async (req, res) => {
+            const email = req.params.email;
+            const query = { email }
+            const user = await usersCollection.findOne(query);
+            res.send({ role: user?.role || 'user' })
+        })
+
     app.post('/users', async (req, res) => {
             const user = req.body;
             user.role = 'user';
@@ -188,7 +281,7 @@ app.get("/users",verifyFBToken, async (req, res) => {
         })
 
 
-        app.get("/users/:email", async (req, res) => {
+        app.get("/users/:email/role", async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersCollection.findOne({ email });
@@ -203,23 +296,28 @@ app.get("/users",verifyFBToken, async (req, res) => {
 });
 
 
-app.patch("/users/:email", async (req, res) => {
+app.patch("/users/:email", verifyFBToken, async (req, res) => {
   const email = req.params.email;
-  const updateData = req.body;
+
+  
+  if (req.decoded_email !== email) {
+    return res.status(403).send({ message: "Forbidden access" });
+  }
 
   try {
+    const updateData = req.body;
     const result = await usersCollection.updateOne(
       { email },
       { $set: updateData }
     );
     res.send(result);
   } catch (err) {
-    console.error(err);
+    console.error("Profile update error:", err);
     res.status(500).send({ message: "Server error" });
   }
 });
 
-app.patch('/users/:id/role', verifyFBToken, async (req, res) => {
+app.patch('/users/:id/role', verifyFBToken,verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const roleInfo = req.body;
             const query = { _id: new ObjectId(id) }
@@ -250,32 +348,31 @@ app.post("/decorators", async(req, res) => {
   res.send(result)
 })
 
-app.patch('/decorators/:id', verifyFBToken, async (req, res) => {
-            const status = req.body.status;
-            const id = req.params.id;
-            const query = { _id: new ObjectId(id) }
-            const updatedDoc = {
-                $set: {
-                    status: status,
-                    workStatus: 'available'
-                }
-            }
+app.patch('/decorators/:id', verifyFBToken, verifyAdmin,async (req, res) => {
+  const status = req.body.status;
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  
+  const decorator = await decoratorsCollection.findOne(query); // fetch decorator info
+  if (!decorator) return res.status(404).send({ message: "Decorator not found" });
 
-            const result = await decoratorsCollection.updateOne(query, updatedDoc);
+  const updatedDoc = {
+    $set: {
+      status: status,
+      workStatus: 'available'
+    }
+  }
 
-             if (status === 'approved') {
-                const email = req.body.email;
-                const userQuery = { email }
-                const updateUser = {
-                    $set: {
-                        role: 'decorator'
-                    }
-                }
-                const userResult = await usersCollection.updateOne(userQuery, updateUser);
-            }
-            res.send(result);
-          })
+  const result = await decoratorsCollection.updateOne(query, updatedDoc);
 
+  if (status === 'approved') {
+    const userQuery = { email: decorator.email }; 
+    const updateUser = { $set: { role: 'decorator' } };
+    await usersCollection.updateOne(userQuery, updateUser);
+  }
+
+  res.send(result);
+})
 
 app.delete('/decorators/:id', verifyFBToken, async (req, res) => {
   const id = req.params.id;
@@ -333,7 +430,7 @@ app.delete('/decorators/:id', verifyFBToken, async (req, res) => {
 
         if (updateBooking.modifiedCount === 0) return res.status(404).send({ message: "Booking not found" });
 
-        // Save payment history
+        
         const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
         await paymentsCollection.insertOne({
           bookingId,
@@ -366,6 +463,17 @@ app.delete('/decorators/:id', verifyFBToken, async (req, res) => {
       const result = await cursor.toArray();
       res.send(result)
     });
+app.get("/decorator/my-bookings", verifyFBToken, async (req, res) => {
+  const email = req.decoded_email;
+
+  const bookings = await bookingsCollection.find({
+    "decoratorAssigned.decoratorEmail": email
+  }).toArray();
+
+  res.send(bookings);
+});
+
+
 
     console.log("MongoDB connected successfully!");
   } finally {
