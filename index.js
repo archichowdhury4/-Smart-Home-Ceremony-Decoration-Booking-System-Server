@@ -82,6 +82,19 @@ async function run() {
   next();
 };
 
+
+const verifyDecorator = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user || user.role !== 'rider') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
+
     //  SERVICES 
     app.get("/services", async (req, res) => {
       const services = await servicesCollection.find().toArray();
@@ -442,7 +455,7 @@ app.delete('/decorators/:id', verifyFBToken, async (req, res) => {
 });
 
  // My Assigned Projects
-app.get("/decorator/my-bookings", verifyFBToken, async (req, res) => {
+app.get("/decorator/my-bookings", verifyFBToken,verifyDecorator, async (req, res) => {
   const email = req.decoded_email;
 
   const bookings = await bookingsCollection.find({
@@ -454,7 +467,7 @@ app.get("/decorator/my-bookings", verifyFBToken, async (req, res) => {
 
 
   //  Today's Schedule 
-app.get("/decorator/today-schedule", verifyFBToken, async (req, res) => {
+app.get("/decorator/today-schedule", verifyFBToken,verifyDecorator, async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0); 
@@ -479,7 +492,7 @@ app.get("/decorator/today-schedule", verifyFBToken, async (req, res) => {
 
   
   // Update Project Status
-app.patch("/decorator/update-status/:id", verifyFBToken, async (req, res) => {
+app.patch("/decorator/update-status/:id", verifyFBToken,verifyDecorator, async (req, res) => {
   const booking = await bookingsCollection.findOne({
     _id: new ObjectId(req.params.id),
     "decoratorAssigned.decoratorEmail": req.decoded_email,
@@ -495,7 +508,7 @@ app.patch("/decorator/update-status/:id", verifyFBToken, async (req, res) => {
   res.send(result);
 });
 
-app.get("/decorator/earnings", verifyFBToken, async (req, res) => {
+app.get("/decorator/earnings", verifyFBToken,verifyDecorator, async (req, res) => {
   const decoratorEmail = req.decoded_email;
   let payments = await paymentsCollection.find({}).toArray();
 
