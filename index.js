@@ -467,34 +467,50 @@ app.get("/decorator/today-schedule", verifyFBToken, async (req, res) => {
 
 
 
+  
   // Update Project Status
-  app.patch("/decorator/update-status/:id", verifyFBToken, async (req, res) => {
-    const booking = await bookingsCollection.findOne({
-      _id: new ObjectId(req.params.id),
-      "decoratorAssigned.decoratorEmail": req.decoded_email,
-    });
-
-    if (!booking) return res.status(403).send({ message: "forbidden" });
-
-    res.send(await bookingsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: { status: req.body.status } }
-    ));
+app.patch("/decorator/update-status/:id", verifyFBToken, async (req, res) => {
+  const booking = await bookingsCollection.findOne({
+    _id: new ObjectId(req.params.id),
+    "decoratorAssigned.decoratorEmail": req.decoded_email,
   });
 
-  // Earnings
- app.get("/decorator/earnings", verifyFBToken, async (req, res) => {
-  const payments = await paymentsCollection.find({
-    decoratorEmail: req.decoded_email
-  }).toArray();
+  if (!booking) return res.status(403).send({ message: "forbidden" });
 
-  const total = payments.reduce((sum, p) => sum + p.amount, 0);
+  const result = await bookingsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: { status: req.body.status } }
+  );
 
-  res.send({
-    total,
-    count: payments.length,
-    payments
-  });
+  res.send(result);
+});
+
+app.get("/decorator/earnings", verifyFBToken, async (req, res) => {
+  const decoratorEmail = req.decoded_email;
+  let payments = await paymentsCollection.find({}).toArray();
+
+  // ensure all payments have decoratorEmail
+  payments = await Promise.all(
+    payments.map(async p => {
+      if (!p.decoratorEmail) {
+        const booking = await bookingsCollection.findOne({ _id: new ObjectId(p.bookingId) });
+        if (booking?.decoratorAssigned?.decoratorEmail) {
+          await paymentsCollection.updateOne(
+            { _id: p._id },
+            { $set: { decoratorEmail: booking.decoratorAssigned.decoratorEmail } }
+          );
+          p.decoratorEmail = booking.decoratorAssigned.decoratorEmail;
+        }
+      }
+      return p;
+    })
+  );
+
+  // filter for current decorator
+  const decoratorPayments = payments.filter(p => p.decoratorEmail === decoratorEmail);
+  const total = decoratorPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  res.send({ total, count: decoratorPayments.length, payments: decoratorPayments });
 });
 
 
@@ -531,52 +547,78 @@ app.get("/decorator/today-schedule", verifyFBToken, async (req, res) => {
       }
     });
 
-// PAYMENT SUCCESS 
-    app.patch("/payment-success/:bookingId", async (req, res) => {
-      const { bookingId } = req.params;
 
-      try {
-        // Update booking status
-        const updateBooking = await bookingsCollection.updateOne(
-          { _id: new ObjectId(bookingId) },
-          { $set: { paymentStatus: "paid", paidAt: new Date() } }
-        );
+// PAYMENT SUCCESS
+app.patch("/payment-success/:bookingId", async (req, res) => {
+  const { bookingId } = req.params;
 
-        if (updateBooking.modifiedCount === 0) return res.status(404).send({ message: "Booking not found" });
+  try {
+    
+    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
+    if (!booking) return res.status(404).send({ message: "Booking not found" });
 
-        
-        const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
-        await paymentsCollection.insertOne({
-          bookingId,
-          userEmail: booking.userEmail,
-          serviceName: booking.serviceName,
-          amount: booking.price,
-          paidAt: new Date(),
-        });
+    
+    if (booking.paymentStatus !== "paid") {
+      await bookingsCollection.updateOne(
+        { _id: new ObjectId(bookingId) },
+        { $set: { paymentStatus: "paid", paidAt: new Date() } }
+      );
+    }
 
-        res.send({ message: "Payment updated & saved successfully" });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ message: "Server error" });
-      }
-    });
+    
+    const existingPayment = await paymentsCollection.findOne({ bookingId });
+    if (!existingPayment) {
+      await paymentsCollection.insertOne({
+        bookingId,
+        userEmail: booking.userEmail,
+        decoratorEmail: booking.decoratorAssigned?.decoratorEmail || "unknown",
+        serviceName: booking.serviceName,
+        amount: booking.price,
+        paidAt: new Date(),
+      });
+    }
+
+    res.send({ message: "Payment updated & saved successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+
 
 // PAYMENT HISTORY 
-    app.get("/payments",verifyFBToken, async (req, res) => {
-      const email = req.query.email;
-      const query = {}
-      console.log("headers",req.headers)
-      if(email){
-        query.userEmail =email
+ app.get("/payments", verifyFBToken, async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).send({ message: "Email is required" });
 
-         if (email !== req.decoded_email) {
-                    return res.status(403).send({ message: 'forbidden access' })
-                }
+    if (email !== req.decoded_email) {
+      return res.status(403).send({ message: 'forbidden access' });
+    }
+
+  
+    const payments = await paymentsCollection
+      .find({ userEmail: email })
+      .sort({ paidAt: -1 })
+      .toArray();
+
+    
+    const uniquePaymentsMap = {};
+    payments.forEach(p => {
+      if (!uniquePaymentsMap[p.bookingId]) {
+        uniquePaymentsMap[p.bookingId] = p;
       }
-      const cursor = paymentsCollection.find(query).sort({ paidAt: -1 });
-      const result = await cursor.toArray();
-      res.send(result)
     });
+
+    const uniquePayments = Object.values(uniquePaymentsMap);
+
+    res.send(uniquePayments);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
 
 
 
