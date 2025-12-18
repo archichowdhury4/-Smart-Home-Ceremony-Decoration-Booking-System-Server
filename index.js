@@ -9,7 +9,13 @@ const port = process.env.PORT || 3000;
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./smart-home-ceremony-decoration-firebase-adminsdk.json");
+// const serviceAccount = require("./smart-home-ceremony-decoration-firebase-adminsdk.json");
+
+
+// const serviceAccount = require("./firebase-admin-key.json");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -128,7 +134,6 @@ app.delete("/services/:id", async (req, res) => {
 
     if (!date) return res.status(400).send({ message: "Date is required" });
 
-    // eventDate properly Date object e convert kora
     const eventDate = new Date(date);
     if (isNaN(eventDate.getTime())) return res.status(400).send({ message: "Invalid date" });
 
@@ -196,19 +201,24 @@ app.patch(
 
     const { decoratorEmail } = req.body;
 
+    // approved decorator only
     const decorator = await decoratorsCollection.findOne({
       email: decoratorEmail,
-      workStatus: "available"
+      status: "approved"
     });
 
     if (!decorator) {
       return res.status(400).send({ message: "Decorator not available" });
     }
 
-    await decoratorsCollection.updateOne(
-      { email: decoratorEmail },
-      { $set: { workStatus: "busy" } }
-    );
+    // prevent double assign
+    const booking = await bookingsCollection.findOne({
+      _id: new ObjectId(req.params.id)
+    });
+
+    if (booking?.decoratorAssigned) {
+      return res.status(400).send({ message: "Decorator already assigned" });
+    }
 
     const result = await bookingsCollection.updateOne(
       { _id: new ObjectId(req.params.id) },
@@ -217,7 +227,7 @@ app.patch(
           decoratorAssigned: {
             decoratorId: decorator._id,
             decoratorName: decorator.name,
-            decoratorEmail,
+            decoratorEmail: decorator.email,
             assignedAt: new Date()
           },
           status: "assigned",
@@ -229,6 +239,7 @@ app.patch(
     res.send(result);
   }
 );
+
 
 // admin/revenue route
 app.get("/admin/revenue", async (req, res) => {
@@ -328,19 +339,16 @@ app.get('/users/:email', async (req, res) => {
         })
 
 
-        app.get("/users/:email/role", async (req, res) => {
+      app.get("/users/:email/role", async (req, res) => {
   const email = req.params.email;
   try {
     const user = await usersCollection.findOne({ email });
-    if (!user) {
-      return res.status(404).send({ message: "User not found" });
-    }
-    res.send(user);
+    res.send({ role: user?.role || "user" });
   } catch (err) {
-    console.error(err);
     res.status(500).send({ message: "Server error" });
   }
 });
+
 
 
 app.patch("/users/:email", verifyFBToken, async (req, res) => {
@@ -390,10 +398,12 @@ app.get("/decorators", async(req, res) =>{
 app.post("/decorators", async(req, res) => {
   const decorator = req.body;
   decorator.status = "pending";
+  decorator.workStatus = "available"; 
   decorator.createdAt = new Date();
   const result = await decoratorsCollection.insertOne(decorator);
-  res.send(result)
-})
+  res.send(result);
+});
+
 
 app.patch('/decorators/:id', verifyFBToken, verifyAdmin,async (req, res) => {
   const status = req.body.status;
@@ -536,8 +546,10 @@ app.get("/decorator/earnings", verifyFBToken, async (req, res) => {
           ],
           mode: "payment",
           customer_email: userEmail,
-          success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?bookingId=${bookingId}`,
-          cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+       success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?bookingId=${bookingId}`,
+         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+
+
         });
 
         res.send({ url: session.url });
@@ -553,34 +565,48 @@ app.patch("/payment-success/:bookingId", async (req, res) => {
   const { bookingId } = req.params;
 
   try {
-    
-    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
-    if (!booking) return res.status(404).send({ message: "Booking not found" });
+    const bookingObjectId = new ObjectId(bookingId);
+
+    const booking = await bookingsCollection.findOne({
+      _id: bookingObjectId,
+    });
+
+    if (!booking) {
+      return res.status(404).send({ message: "Booking not found" });
+    }
 
     
     if (booking.paymentStatus !== "paid") {
       await bookingsCollection.updateOne(
-        { _id: new ObjectId(bookingId) },
-        { $set: { paymentStatus: "paid", paidAt: new Date() } }
+        { _id: bookingObjectId },
+        {
+          $set: {
+            paymentStatus: "paid",
+            paidAt: new Date(),
+          },
+        }
       );
     }
 
     
-    const existingPayment = await paymentsCollection.findOne({ bookingId });
+    const existingPayment = await paymentsCollection.findOne({
+      bookingId: bookingId.toString(),
+    });
+
     if (!existingPayment) {
       await paymentsCollection.insertOne({
-        bookingId,
+        bookingId: bookingId.toString(),
         userEmail: booking.userEmail,
-        decoratorEmail: booking.decoratorAssigned?.decoratorEmail || "unknown",
+        decoratorEmail: booking.decoratorAssigned?.decoratorEmail || null,
         serviceName: booking.serviceName,
-        amount: booking.price,
+        amount: Number(booking.price),
         paidAt: new Date(),
       });
     }
 
-    res.send({ message: "Payment updated & saved successfully" });
+    res.send({ message: "Payment processed successfully" });
   } catch (err) {
-    console.error(err);
+    console.error("Payment success error:", err);
     res.status(500).send({ message: "Server error" });
   }
 });
